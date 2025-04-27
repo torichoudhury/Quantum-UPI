@@ -4,8 +4,35 @@ from qiskit_aer import Aer
 from qiskit.primitives import Sampler
 import random
 
+class QuantumRandomNumberGenerator:
+    def __init__(self):
+        self.sampler = Sampler()
+    
+    def generate_random_bits(self, num_bits):
+        """Generate truly random bits using quantum circuits"""
+        random_bits = []
+        
+        for _ in range(num_bits):
+            # Create a quantum circuit with one qubit
+            qc = QuantumCircuit(1, 1)
+            
+            # Apply Hadamard gate to create superposition
+            qc.h(0)
+            
+            # Measure the qubit
+            qc.measure(0, 0)
+            
+            # Execute the circuit using Sampler
+            result = self.sampler.run(qc, shots=1).result()
+            
+            # Extract the measurement result (0 or 1)
+            bit = list(result.quasi_dists[0].keys())[0]
+            random_bits.append(bit)
+            
+        return random_bits
+
 class QuantumKeyDistribution:
-    def __init__(self, key_length=32):
+    def __init__(self, key_length=32, use_qrng=True):
         self.key_length = key_length
         self.alice_bits = None
         self.alice_bases = None
@@ -13,14 +40,23 @@ class QuantumKeyDistribution:
         self.bob_results = None
         self.shared_key = None
         self.sampler = Sampler()
+        self.use_qrng = use_qrng
+        if use_qrng:
+            self.qrng = QuantumRandomNumberGenerator()
         
     def generate_random_bits(self, n):
         """Generate n random bits (0 or 1)"""
-        return [random.randint(0, 1) for _ in range(n)]
+        if self.use_qrng:
+            return self.qrng.generate_random_bits(n)
+        else:
+            return [random.randint(0, 1) for _ in range(n)]
     
     def generate_random_bases(self, n):
         """Generate n random bases (0 for Z-basis, 1 for X-basis)"""
-        return [random.randint(0, 1) for _ in range(n)]
+        if self.use_qrng:
+            return self.qrng.generate_random_bits(n)
+        else:
+            return [random.randint(0, 1) for _ in range(n)]
     
     def prepare_qubits(self, bits, bases):
         """Prepare qubits according to bits and bases"""
