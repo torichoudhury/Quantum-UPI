@@ -1,8 +1,20 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 import json
 import time
 from quantum_key_distribution import QuantumKeyDistribution
+import queue
+import threading
+
+app = Flask(__name__)
+CORS(app, resources={
+    "/api/*": {
+        "origins": ["http://localhost:3000"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
+
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app)
@@ -10,6 +22,9 @@ CORS(app)
 # Store transaction data and keys (In a real system, this would be a secure database)
 transactions = {}
 keys = {}
+
+# Event queue for SSE
+event_queue = queue.Queue()
 
 @app.route('/')
 def index():
@@ -46,6 +61,14 @@ def generate_key():
         "receiver": receiver,
         "status": "key_generated"
     }
+    
+    # Send event to notify about new transaction
+    event_data = {
+        "event": "transaction_created",
+        "transaction_id": transaction_id,
+        "status": "key_generated"
+    }
+    event_queue.put(json.dumps(event_data))
     
     # In a real scenario, only the shared key would be stored securely
     # Other data is returned here for demonstration purposes
@@ -104,6 +127,16 @@ def process_transaction():
     transactions[transaction_id]["status"] = "completed"
     transactions[transaction_id]["amount"] = float(amount)
     transactions[transaction_id]["encrypted_length"] = len(encrypted_data)
+    transactions[transaction_id]["timestamp"] = time.time()
+    
+    # Send event to notify about transaction update
+    event_data = {
+        "event": "transaction_updated",
+        "transaction_id": transaction_id,
+        "status": "completed",
+        "amount": float(amount)
+    }
+    event_queue.put(json.dumps(event_data))
     
     return jsonify({
         "transaction_id": transaction_id,
@@ -129,5 +162,23 @@ def transaction_status(transaction_id):
         "details": transactions[transaction_id]
     })
 
+@app.route('/api/events', methods=['GET'])
+def events():
+    """SSE endpoint for real-time updates"""
+    def generate():
+        # Send initial keep-alive
+        yield "data: {\"event\": \"connected\"}\n\n"
+        
+        while True:
+            try:
+                # Get event with timeout to allow for connection closing
+                event_data = event_queue.get(timeout=30)
+                yield f"data: {event_data}\n\n"
+            except queue.Empty:
+                # Send keep-alive every 30 seconds
+                yield "data: {\"event\": \"keep-alive\"}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, threaded=True)
